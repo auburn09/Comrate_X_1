@@ -81,7 +81,7 @@ if not unprocessed_mvdr23.empty:
         'id': [''] * len(unprocessed_mvdr23),
         'name_ru': unprocessed_mvdr23['departmentname'],
         'name_en': ['nan'] * len(unprocessed_mvdr23),
-        'regula_code': unprocessed_mvdr23['original_departmentcode'],  # Используем исходный формат
+        'regula_code': unprocessed_mvdr23['original_departmentcode'],
         'elpost_code': [''] * len(unprocessed_mvdr23),
         'epgu_code': unprocessed_mvdr23['recordid']
     })
@@ -103,6 +103,25 @@ final_data['id_sort'] = pd.to_numeric(final_data['id'], errors='coerce')
 final_data = final_data.sort_values(by='id_sort', na_position='last')
 final_data = final_data.drop(columns=['id_sort'])
 logging.info("Сортировка завершена")
+
+# Подсчёт статистики
+logging.info("Подсчёт статистики")
+initial_ao_rows = len(ao_db_prod)
+initial_mvdr_rows = len(mvdr23)
+total_final_rows = len(final_data)
+rows_with_id = len(final_data[final_data['id'].notna() & (final_data['id'] != '')])
+rows_with_elpost = len(final_data[final_data['elpost_code'].notna() & (final_data['elpost_code'] != '')])
+rows_with_epgu = len(final_data[final_data['epgu_code'].notna() & (final_data['epgu_code'] != '')])
+matched_rows = len(matched_ids)
+
+logging.info(f"Статистика:")
+logging.info(f" - Строк в AO db prod изначально: {initial_ao_rows}")
+logging.info(f" - Строк в MVDR23 изначально: {initial_mvdr_rows}")
+logging.info(f" - Всего строк в результирующем файле: {total_final_rows}")
+logging.info(f" - Строк с непустым id: {rows_with_id}")
+logging.info(f" - Строк с непустым elpost_code: {rows_with_elpost}")
+logging.info(f" - Строк с непустым epgu_code: {rows_with_epgu}")
+logging.info(f" - Строк успешно объединено: {matched_rows}")
 
 # Сохранение результата
 output_file = 'result_file.csv'
