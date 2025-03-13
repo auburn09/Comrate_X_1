@@ -14,9 +14,7 @@ logging.basicConfig(
 def preprocess_text(text):
     if pd.isna(text):
         return ''
-    # Убираем все спецсимволы, оставляем только буквы, цифры и пробелы
     text = re.sub(r'[^A-Za-zА-Яа-я0-9\s]', '', str(text))
-    # Нормализуем пробелы и приводим к верхнему регистру
     text = re.sub(r'\s+', ' ', text.strip()).upper()
     return text
 
@@ -24,7 +22,6 @@ def preprocess_text(text):
 def preprocess_code(text):
     if pd.isna(text):
         return ''
-    # Только убираем пробелы по краям и приводим к верхнему регистру
     return str(text).strip().upper()
 
 # Чтение файлов
@@ -49,6 +46,10 @@ mvdr23['departmentname'] = mvdr23['departmentname'].apply(preprocess_text)
 mvdr23['departmentcode'] = mvdr23['departmentcode'].apply(preprocess_code)
 logging.info("Предобработка завершена: спецсимволы удалены из названий, коды сохранены в исходном виде")
 
+# Проверка дубликатов в AO db prod
+duplicates_ao = ao_db_prod.duplicated(subset=['name_ru', 'regula_code'], keep='first').sum()
+logging.info(f"Найдено дубликатов в AO db prod по (name_ru, regula_code): {duplicates_ao}")
+
 # Создание словаря для поиска совпадений из MVDR23
 logging.info("Создание словаря для поиска совпадений")
 mvdr_dict = {(row['departmentname'], row['departmentcode']): row['recordid'] 
@@ -57,14 +58,21 @@ logging.info(f"Словарь создан, размер: {len(mvdr_dict)} за�
 
 # Обработка строк AO db prod и обновление epgu_code
 logging.info("Начало обработки строк AO db prod")
-matched_ids = set()  # Для отслеживания использованных recordid
+matched_ids = set()  # Уникальные использованные recordid
+used_keys = set()    # Уникальные (name_ru, regula_code) из AO db prod
 for index, row in ao_db_prod.iterrows():
     key = (row['name_ru'], row['regula_code'])
     recordid = mvdr_dict.get(key)
     if recordid:
-        ao_db_prod.at[index, 'epgu_code'] = recordid
-        matched_ids.add(recordid)
-        logging.info(f"Строка id={row['id']}: найдено совпадение с recordid={recordid}")
+        if recordid not in matched_ids:
+            ao_db_prod.at[index, 'epgu_code'] = recordid
+            matched_ids.add(recordid)
+            used_keys.add(key)
+            logging.info(f"Строка id={row['id']}: найдено совпадение с recordid={recordid}")
+        elif key in used_keys:
+            logging.warning(f"Строка id={row['id']}: дубликат ключа {key}, recordid={recordid} уже использован, пропущен")
+        else:
+            logging.warning(f"Строка id={row['id']}: recordid={recordid} уже использован для другого ключа, пропущен")
     else:
         logging.info(f"Строка id={row['id']}: совпадение не найдено для name_ru='{row['name_ru']}', regula_code='{row['regula_code']}'")
 logging.info("Обработка строк AO db prod завершена")
@@ -111,7 +119,8 @@ initial_mvdr_rows = len(mvdr23)
 total_final_rows = len(final_data)
 rows_with_id = len(final_data[final_data['id'].notna() & (final_data['id'] != '')])
 rows_with_elpost = len(final_data[final_data['elpost_code'].notna() & (final_data['elpost_code'] != '')])
-rows_with_epgu = len(final_data[final_data['epgu_code'].notna() & (final_data['epgu_code'] != '')])
+rows_with_epgu = final_data['epgu_code'].notna().sum()  # Все непустые epgu_code
+unique_epgu = final_data['epgu_code'].nunique()  # Уникальные epgu_code
 matched_rows = len(matched_ids)
 
 logging.info(f"Статистика:")
@@ -121,6 +130,7 @@ logging.info(f" - Всего строк в результирующем файл
 logging.info(f" - Строк с непустым id: {rows_with_id}")
 logging.info(f" - Строк с непустым elpost_code: {rows_with_elpost}")
 logging.info(f" - Строк с непустым epgu_code: {rows_with_epgu}")
+logging.info(f" - Уникальных epgu_code: {unique_epgu}")
 logging.info(f" - Строк успешно объединено: {matched_rows}")
 
 # Сохранение результата
