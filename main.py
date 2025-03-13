@@ -37,6 +37,7 @@ except Exception as e:
 # Сохраняем исходные значения regula_code и departmentcode
 ao_db_prod['original_regula_code'] = ao_db_prod['regula_code']
 mvdr23['original_departmentcode'] = mvdr23['departmentcode']
+mvdr23['original_departmentname'] = mvdr23['departmentname']  # Сохраняем исходные departmentname
 
 # Предобработка данных
 logging.info("Начало предобработки данных")
@@ -50,9 +51,9 @@ logging.info("Предобработка завершена: спецсимво�
 duplicates_ao = ao_db_prod.duplicated(subset=['name_ru', 'regula_code'], keep='first').sum()
 logging.info(f"Найдено дубликатов в AO db prod по (name_ru, regula_code): {duplicates_ao}")
 
-# Создание словаря для поиска совпадений из MVDR23
+# Создание словаря для поиска совпадений и сохранения исходных departmentname
 logging.info("Создание словаря для поиска совпадений")
-mvdr_dict = {(row['departmentname'], row['departmentcode']): row['recordid'] 
+mvdr_dict = {(row['departmentname'], row['departmentcode']): (row['recordid'], row['original_departmentname']) 
              for _, row in mvdr23.iterrows()}
 logging.info(f"Словарь создан, размер: {len(mvdr_dict)} записей")
 
@@ -62,8 +63,9 @@ matched_ids = set()  # Уникальные использованные recordi
 used_keys = set()    # Уникальные (name_ru, regula_code) из AO db prod
 for index, row in ao_db_prod.iterrows():
     key = (row['name_ru'], row['regula_code'])
-    recordid = mvdr_dict.get(key)
-    if recordid:
+    match = mvdr_dict.get(key)
+    if match:
+        recordid, _ = match  # Разделяем recordid и original_departmentname
         if recordid not in matched_ids:
             ao_db_prod.at[index, 'epgu_code'] = recordid
             matched_ids.add(recordid)
@@ -87,7 +89,7 @@ if not unprocessed_mvdr23.empty:
     logging.info("Форматирование необработанных строк")
     unprocessed_formatted = pd.DataFrame({
         'id': [''] * len(unprocessed_mvdr23),
-        'name_ru': unprocessed_mvdr23['departmentname'],
+        'name_ru': unprocessed_mvdr23['departmentname'],  # Пока используем предобработанные
         'name_en': ['nan'] * len(unprocessed_mvdr23),
         'regula_code': unprocessed_mvdr23['original_departmentcode'],
         'elpost_code': [''] * len(unprocessed_mvdr23),
@@ -104,6 +106,12 @@ else:
 # Заменяем regula_code на исходные значения
 final_data['regula_code'] = final_data['original_regula_code'].fillna(final_data['regula_code'])
 final_data = final_data.drop(columns=['original_regula_code'], errors='ignore')
+
+# Распределяем исходные departmentname по epgu_code
+logging.info("Распределение исходных departmentname из MVDR23")
+recordid_to_departmentname = {row['recordid']: row['original_departmentname'] for _, row in mvdr23.iterrows()}
+final_data['name_ru'] = final_data['epgu_code'].map(recordid_to_departmentname).fillna(final_data['name_ru'])
+logging.info("Исходные departmentname успешно распределены")
 
 # Постобработка: сортировка по id без изменения типа
 logging.info("Сортировка данных по полю id")
